@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Asesor de Portafolio</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   :root {
     color-scheme: light;
@@ -152,7 +153,8 @@
 
     <div class="tabs">
       <button class="tab-btn active" data-tab="simulador" onclick="switchTab('simulador')">Simulador de aporte</button>
-      <button class="tab-btn" data-tab="acciones" onclick="switchTab('acciones')">Acciones y ETFs</button>
+      <button class="tab-btn" data-tab="acciones" onclick="switchTab('acciones')">Acciones individuales</button>
+      <button class="tab-btn" data-tab="etfs" onclick="switchTab('etfs')">ETFs</button>
       <button class="tab-btn" data-tab="riesgos" onclick="switchTab('riesgos')">Riesgos &amp; recomendaciones</button>
     </div>
 
@@ -209,22 +211,28 @@
         <div id="targets-editor" class="hidden" style="margin-top:12px;"></div>
         <div id="simulator-table-wrap" style="margin-top:12px;">
           <table>
-            <thead><tr><th>Ticker</th><th>Peso actual</th><th>Peso objetivo</th><th>Monto sugerido</th><th>Peso resultante</th><th>Motivo</th></tr></thead>
+            <thead><tr><th>Ticker</th><th>Peso actual</th><th>Peso objetivo</th><th>Monto sugerido</th><th>Peso resultante</th></tr></thead>
             <tbody id="simulator-tbody"></tbody>
           </table>
           <p id="simulator-totals" class="sub" style="margin-top:10px;"></p>
         </div>
       </div>
+
+      <div class="card">
+        <h3>Peso actual vs. objetivo por posición</h3>
+        <div class="chart-box"><canvas id="chart-target"></canvas></div>
+      </div>
     </div>
 
-    <!-- ACCIONES Y ETFS -->
+    <!-- ACCIONES -->
     <div class="tab-panel" id="tab-acciones">
-      <div class="section-title">Acciones individuales</div>
       <p class="sub" style="margin-bottom:14px;">Fundamentales, flujo de caja, valoración DCF ilustrativa, consenso
         de analistas y riesgos — datos en vivo vía Financial Modeling Prep.</p>
       <div id="stock-cards"></div>
+    </div>
 
-      <div class="section-title" style="margin-top:26px;">ETFs</div>
+    <!-- ETFS -->
+    <div class="tab-panel" id="tab-etfs">
       <p class="sub" style="margin-bottom:14px;">Tus ETFs representan el <strong id="etf-weight-txt">0%</strong>
         del portafolio.</p>
       <div class="etf-grid" id="etf-cards"></div>
@@ -237,7 +245,7 @@
     </div>
 
     <footer class="note">
-      Datos de mercado vía Financial Modeling Prep. Lectura de portafolio vía Gemini (Google). Los modelos DCF
+      Datos de mercado vía Financial Modeling Prep. Lectura de portafolio vía Claude (Anthropic). Los modelos DCF
       usan supuestos definidos por esta app, no consenso de mercado.
     </footer>
   </div>
@@ -261,6 +269,7 @@ let positions = [];       // [{ticker,name,assetType,investedUsd,gainPct,current
 let targetWeights = {};   // {ticker: pct}
 let marketData = {};      // {ticker: fundamentals}
 let draftPositions = null;
+let targetChart = null;
 
 // ---------- HELPERS ----------
 function fmtUsd(n) {
@@ -503,18 +512,13 @@ function computeAllocation(amount) {
 
   const totalGap = rows.reduce((s, r) => s + r.gap, 0);
   const allocated = {};
-  let branch;
   if (amount <= 0) {
-    branch = "none";
     rows.forEach((r) => (allocated[r.ticker] = 0));
   } else if (totalGap <= 0) {
-    branch = "byTarget";
     rows.forEach((r) => (allocated[r.ticker] = amount * (r.targetPct / totalTargetPct)));
   } else if (totalGap >= amount) {
-    branch = "gapPriority";
     rows.forEach((r) => (allocated[r.ticker] = amount * (r.gap / totalGap)));
   } else {
-    branch = "gapPlusLeftover";
     const leftover = amount - totalGap;
     rows.forEach((r) => (allocated[r.ticker] = r.gap + leftover * (r.targetPct / totalTargetPct)));
   }
@@ -522,48 +526,50 @@ function computeAllocation(amount) {
   return rows.map((r) => {
     const suggestedAdd = allocated[r.ticker] || 0;
     const newValue = r.currentValue + suggestedAdd;
-    let reason;
-    if (branch === "none") {
-      reason = "Ingresa un monto a invertir para ver la sugerencia.";
-    } else if (suggestedAdd < 0.005) {
-      reason = "Ya está en o sobre su peso objetivo (" + r.weight.toFixed(1) + "% vs " + r.targetPct.toFixed(1) + "% objetivo) — sin aporte nuevo.";
-    } else if (branch === "byTarget") {
-      reason = "Todas las posiciones ya están en su peso objetivo — el aporte se reparte según el peso objetivo de cada una.";
-    } else if (branch === "gapPriority") {
-      reason = "Está US$" + r.gap.toFixed(0) + " bajo su peso objetivo — se prioriza para cerrar esa brecha.";
-    } else {
-      reason = "Se cierra su brecha completa (US$" + r.gap.toFixed(0) + ") y además recibe una parte del monto restante.";
-    }
-    return Object.assign({}, r, { suggestedAdd, newValue, newWeight: newTotal > 0 ? (newValue / newTotal) * 100 : 0, reason });
+    return Object.assign({}, r, { suggestedAdd, newValue, newWeight: newTotal > 0 ? (newValue / newTotal) * 100 : 0 });
   });
 }
 
 function renderSimulator() {
-  const tbody = el("simulator-tbody");
-  const totalsEl = el("simulator-totals");
   if (positions.length === 0) {
-    if (tbody) tbody.innerHTML = "";
-    if (totalsEl) totalsEl.textContent = "Todavía no tienes posiciones cargadas.";
+    el("simulator-table-wrap").innerHTML = '<p class="sub">Todavía no tienes posiciones cargadas.</p>';
     return;
   }
   const amount = Number(el("invest-amount").value) || 0;
   const rows = computeAllocation(amount).sort((a, b) => b.suggestedAdd - a.suggestedAdd);
 
+  const tbody = el("simulator-tbody");
   if (tbody) {
     tbody.innerHTML = rows.map((r) => (
       "<tr><td><strong>" + r.ticker + "</strong></td>" +
       "<td>" + r.weight.toFixed(2) + "%</td>" +
       "<td>" + r.targetPct.toFixed(1) + "%</td>" +
       "<td>" + fmtUsd(r.suggestedAdd) + (r.suggestedAdd < 0.005 ? ' <span class="badge amber">sin aporte</span>' : "") + "</td>" +
-      "<td>" + r.newWeight.toFixed(2) + "%</td>" +
-      "<td class=\"sub\" style=\"font-size:12px;\">" + r.reason + "</td></tr>"
+      "<td>" + r.newWeight.toFixed(2) + "%</td></tr>"
     )).join("");
   }
 
   const totalCurrent = positions.reduce((s, p) => s + p.currentValue, 0);
+  const totalsEl = el("simulator-totals");
   if (totalsEl) {
     totalsEl.textContent = "Aporte a distribuir: " + fmtUsd(amount) + " · Valor actual: " + fmtUsd(totalCurrent) +
       " · Valor proyectado: " + fmtUsd(totalCurrent + amount);
+  }
+
+  if (targetChart) targetChart.destroy();
+  const ctx = el("chart-target");
+  if (ctx) {
+    targetChart = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: rows.map((r) => r.ticker),
+        datasets: [
+          { label: "Peso actual", data: rows.map((r) => r.weight), backgroundColor: "#b7c6f0" },
+          { label: "Peso objetivo", data: rows.map((r) => r.targetPct), backgroundColor: "#2454d6" },
+        ],
+      },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "top" } }, scales: { y: { ticks: { callback: (v) => v + "%" } } } },
+    });
   }
 }
 
