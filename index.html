@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Asesor de Portafolio</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   :root {
     color-scheme: light;
@@ -153,8 +152,8 @@
 
     <div class="tabs">
       <button class="tab-btn active" data-tab="simulador" onclick="switchTab('simulador')">Simulador de aporte</button>
-      <button class="tab-btn" data-tab="acciones" onclick="switchTab('acciones')">Acciones individuales</button>
-      <button class="tab-btn" data-tab="etfs" onclick="switchTab('etfs')">ETFs</button>
+      <button class="tab-btn" data-tab="acciones" onclick="switchTab('acciones')">Acciones y ETFs</button>
+      <button class="tab-btn" data-tab="oportunidades" onclick="switchTab('oportunidades')">Oportunidades</button>
       <button class="tab-btn" data-tab="riesgos" onclick="switchTab('riesgos')">Riesgos &amp; recomendaciones</button>
     </div>
 
@@ -168,6 +167,7 @@
           <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
             <button class="btn btn-primary" style="width:auto;" onclick="document.getElementById('file-input').click()">Elegir imagen</button>
             <a style="font-weight:600; color:var(--blue); cursor:pointer; font-size:13px;" onclick="startManualEntry()">O ingresar manualmente</a>
+            <a style="font-weight:600; color:var(--red); cursor:pointer; font-size:13px;" onclick="handleResetPortfolio()">🗑️ Reiniciar portafolio</a>
             <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp" class="hidden" onchange="handleFileSelected(event)">
           </div>
           <p id="upload-status" class="sub" style="margin-top:8px;"></p>
@@ -211,31 +211,42 @@
         <div id="targets-editor" class="hidden" style="margin-top:12px;"></div>
         <div id="simulator-table-wrap" style="margin-top:12px;">
           <table>
-            <thead><tr><th>Ticker</th><th>Peso actual</th><th>Peso objetivo</th><th>Monto sugerido</th><th>Peso resultante</th></tr></thead>
+            <thead><tr><th>Ticker</th><th>Peso actual</th><th>Peso objetivo</th><th>Monto sugerido</th><th>Peso resultante</th><th>Motivo</th></tr></thead>
             <tbody id="simulator-tbody"></tbody>
           </table>
           <p id="simulator-totals" class="sub" style="margin-top:10px;"></p>
         </div>
       </div>
-
-      <div class="card">
-        <h3>Peso actual vs. objetivo por posición</h3>
-        <div class="chart-box"><canvas id="chart-target"></canvas></div>
-      </div>
     </div>
 
-    <!-- ACCIONES -->
+    <!-- ACCIONES Y ETFS -->
     <div class="tab-panel" id="tab-acciones">
+      <div class="section-title">Acciones individuales</div>
       <p class="sub" style="margin-bottom:14px;">Fundamentales, flujo de caja, valoración DCF ilustrativa, consenso
         de analistas y riesgos — datos en vivo vía Financial Modeling Prep.</p>
       <div id="stock-cards"></div>
-    </div>
 
-    <!-- ETFS -->
-    <div class="tab-panel" id="tab-etfs">
+      <div class="section-title" style="margin-top:26px;">ETFs</div>
       <p class="sub" style="margin-bottom:14px;">Tus ETFs representan el <strong id="etf-weight-txt">0%</strong>
         del portafolio.</p>
       <div class="etf-grid" id="etf-cards"></div>
+    </div>
+
+    <!-- OPORTUNIDADES -->
+    <div class="tab-panel" id="tab-oportunidades">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px; margin-bottom:14px;">
+        <p class="sub" style="max-width:640px;">Una selección general de acciones y ETFs con indicadores de alto
+          potencial (crecimiento, valoración DCF ilustrativa, consenso de analistas) que hoy no están en tu
+          portafolio. No es una recomendación personalizada — es un punto de partida para investigar más.</p>
+        <button class="btn btn-ghost" style="width:auto; white-space:nowrap;" onclick="loadOpportunities(true)">↻ Actualizar oportunidades</button>
+      </div>
+      <p id="opportunities-status" class="sub" style="margin-bottom:10px;"></p>
+
+      <div class="section-title">Acciones con alto potencial</div>
+      <div id="opportunity-stock-cards"></div>
+
+      <div class="section-title" style="margin-top:26px;">ETFs con alto potencial</div>
+      <div class="etf-grid" id="opportunity-etf-cards"></div>
     </div>
 
     <!-- RIESGOS -->
@@ -245,7 +256,7 @@
     </div>
 
     <footer class="note">
-      Datos de mercado vía Financial Modeling Prep. Lectura de portafolio vía Claude (Anthropic). Los modelos DCF
+      Datos de mercado vía Financial Modeling Prep. Lectura de portafolio vía Gemini (Google). Los modelos DCF
       usan supuestos definidos por esta app, no consenso de mercado.
     </footer>
   </div>
@@ -263,13 +274,19 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const DEFAULT_TARGET_WEIGHTS = { VOO: 30, SCHD: 15, VXUS: 12, QQQ: 8 };
 
+// Selección general de ideas de alto potencial (no personalizada). Se filtran las que
+// ya tengas en tu portafolio para mostrar solo ideas nuevas.
+const OPPORTUNITY_STOCKS = ["MSFT", "GOOGL", "AMZN", "META", "CRM", "ADBE", "COST", "LLY"];
+const OPPORTUNITY_ETFS = ["VUG", "SCHG", "VGT", "SMH"];
+
 // ---------- ESTADO ----------
 let authMode = "login"; // "login" | "signup"
 let positions = [];       // [{ticker,name,assetType,investedUsd,gainPct,currentValue,weight}]
 let targetWeights = {};   // {ticker: pct}
 let marketData = {};      // {ticker: fundamentals}
 let draftPositions = null;
-let targetChart = null;
+let opportunityData = {};    // {ticker: fundamentals}
+let opportunitiesLoaded = false;
 
 // ---------- HELPERS ----------
 function fmtUsd(n) {
@@ -496,6 +513,25 @@ async function confirmSavePositions() {
   renderAll();
 }
 
+async function handleResetPortfolio() {
+  if (positions.length === 0) { alert("Todavía no tienes posiciones cargadas."); return; }
+  const ok = confirm("¿Seguro que quieres borrar todas tus posiciones cargadas? Esta acción no se puede deshacer.");
+  if (!ok) return;
+
+  const { data: userData } = await sb.auth.getUser();
+  const uid = userData.user.id;
+  const { error } = await sb.from("positions").delete().eq("user_id", uid);
+  if (error) { alert("Error al reiniciar: " + error.message); return; }
+
+  positions = [];
+  marketData = {};
+  draftPositions = null;
+  el("upload-draft").classList.add("hidden");
+  el("upload-idle").classList.remove("hidden");
+  el("upload-status").textContent = "Portafolio reiniciado. Carga una nueva captura o ingresa manualmente.";
+  renderAll();
+}
+
 // ---------- SIMULADOR ----------
 function computeAllocation(amount) {
   const totalCurrent = positions.reduce((s, p) => s + p.currentValue, 0);
@@ -512,13 +548,18 @@ function computeAllocation(amount) {
 
   const totalGap = rows.reduce((s, r) => s + r.gap, 0);
   const allocated = {};
+  let branch;
   if (amount <= 0) {
+    branch = "none";
     rows.forEach((r) => (allocated[r.ticker] = 0));
   } else if (totalGap <= 0) {
+    branch = "byTarget";
     rows.forEach((r) => (allocated[r.ticker] = amount * (r.targetPct / totalTargetPct)));
   } else if (totalGap >= amount) {
+    branch = "gapPriority";
     rows.forEach((r) => (allocated[r.ticker] = amount * (r.gap / totalGap)));
   } else {
+    branch = "gapPlusLeftover";
     const leftover = amount - totalGap;
     rows.forEach((r) => (allocated[r.ticker] = r.gap + leftover * (r.targetPct / totalTargetPct)));
   }
@@ -526,50 +567,48 @@ function computeAllocation(amount) {
   return rows.map((r) => {
     const suggestedAdd = allocated[r.ticker] || 0;
     const newValue = r.currentValue + suggestedAdd;
-    return Object.assign({}, r, { suggestedAdd, newValue, newWeight: newTotal > 0 ? (newValue / newTotal) * 100 : 0 });
+    let reason;
+    if (branch === "none") {
+      reason = "Ingresa un monto a invertir para ver la sugerencia.";
+    } else if (suggestedAdd < 0.005) {
+      reason = "Ya está en o sobre su peso objetivo (" + r.weight.toFixed(1) + "% vs " + r.targetPct.toFixed(1) + "% objetivo) — sin aporte nuevo.";
+    } else if (branch === "byTarget") {
+      reason = "Todas las posiciones ya están en su peso objetivo — el aporte se reparte según el peso objetivo de cada una.";
+    } else if (branch === "gapPriority") {
+      reason = "Está US$" + r.gap.toFixed(0) + " bajo su peso objetivo — se prioriza para cerrar esa brecha.";
+    } else {
+      reason = "Se cierra su brecha completa (US$" + r.gap.toFixed(0) + ") y además recibe una parte del monto restante.";
+    }
+    return Object.assign({}, r, { suggestedAdd, newValue, newWeight: newTotal > 0 ? (newValue / newTotal) * 100 : 0, reason });
   });
 }
 
 function renderSimulator() {
+  const tbody = el("simulator-tbody");
+  const totalsEl = el("simulator-totals");
   if (positions.length === 0) {
-    el("simulator-table-wrap").innerHTML = '<p class="sub">Todavía no tienes posiciones cargadas.</p>';
+    if (tbody) tbody.innerHTML = "";
+    if (totalsEl) totalsEl.textContent = "Todavía no tienes posiciones cargadas.";
     return;
   }
   const amount = Number(el("invest-amount").value) || 0;
   const rows = computeAllocation(amount).sort((a, b) => b.suggestedAdd - a.suggestedAdd);
 
-  const tbody = el("simulator-tbody");
   if (tbody) {
     tbody.innerHTML = rows.map((r) => (
       "<tr><td><strong>" + r.ticker + "</strong></td>" +
       "<td>" + r.weight.toFixed(2) + "%</td>" +
       "<td>" + r.targetPct.toFixed(1) + "%</td>" +
       "<td>" + fmtUsd(r.suggestedAdd) + (r.suggestedAdd < 0.005 ? ' <span class="badge amber">sin aporte</span>' : "") + "</td>" +
-      "<td>" + r.newWeight.toFixed(2) + "%</td></tr>"
+      "<td>" + r.newWeight.toFixed(2) + "%</td>" +
+      "<td class=\"sub\" style=\"font-size:12px;\">" + r.reason + "</td></tr>"
     )).join("");
   }
 
   const totalCurrent = positions.reduce((s, p) => s + p.currentValue, 0);
-  const totalsEl = el("simulator-totals");
   if (totalsEl) {
     totalsEl.textContent = "Aporte a distribuir: " + fmtUsd(amount) + " · Valor actual: " + fmtUsd(totalCurrent) +
       " · Valor proyectado: " + fmtUsd(totalCurrent + amount);
-  }
-
-  if (targetChart) targetChart.destroy();
-  const ctx = el("chart-target");
-  if (ctx) {
-    targetChart = new Chart(ctx, {
-      type: "bar",
-      data: {
-        labels: rows.map((r) => r.ticker),
-        datasets: [
-          { label: "Peso actual", data: rows.map((r) => r.weight), backgroundColor: "#b7c6f0" },
-          { label: "Peso objetivo", data: rows.map((r) => r.targetPct), backgroundColor: "#2454d6" },
-        ],
-      },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: "top" } }, scales: { y: { ticks: { callback: (v) => v + "%" } } } },
-    });
   }
 }
 
@@ -701,6 +740,121 @@ function renderEtfCards() {
   }).join("");
 }
 
+// ---------- OPORTUNIDADES ----------
+async function loadOpportunities(force) {
+  const owned = new Set(positions.map((p) => p.ticker));
+  const stockTickers = OPPORTUNITY_STOCKS.filter((t) => !owned.has(t));
+  const etfTickers = OPPORTUNITY_ETFS.filter((t) => !owned.has(t));
+  const tickers = stockTickers.concat(etfTickers);
+  const types = stockTickers.map(() => "stock").concat(etfTickers.map(() => "etf"));
+
+  const status = el("opportunities-status");
+  if (tickers.length === 0) {
+    opportunitiesLoaded = true;
+    if (status) status.textContent = "Ya tienes todas las ideas de esta lista en tu portafolio.";
+    renderOpportunities();
+    return;
+  }
+
+  if (status) status.textContent = "Consultando datos en vivo — puede tardar unos segundos…";
+  const { data: sessionData } = await sb.auth.getSession();
+  const token = sessionData.session ? sessionData.session.access_token : null;
+  try {
+    const { data, error } = await sb.functions.invoke("market-data", {
+      body: { tickers, types, force: !!force },
+      headers: token ? { Authorization: "Bearer " + token } : {},
+    });
+    if (error) throw error;
+    opportunityData = data.data || {};
+    opportunitiesLoaded = true;
+    if (status) status.textContent = "Datos actualizados.";
+  } catch (e) {
+    if (status) status.textContent = "No se pudo cargar: " + (e.message || e);
+  }
+  renderOpportunities();
+}
+
+function renderOpportunities() {
+  const stockContainer = el("opportunity-stock-cards");
+  const etfContainer = el("opportunity-etf-cards");
+  if (!stockContainer || !etfContainer) return;
+
+  if (!opportunitiesLoaded) {
+    stockContainer.innerHTML = '<p class="sub">Presiona "Actualizar oportunidades" para cargar esta lista.</p>';
+    etfContainer.innerHTML = "";
+    return;
+  }
+
+  const owned = new Set(positions.map((p) => p.ticker));
+  const stockItems = OPPORTUNITY_STOCKS.filter((t) => !owned.has(t) && opportunityData[t]).map((t) => opportunityData[t]);
+  const etfItems = OPPORTUNITY_ETFS.filter((t) => !owned.has(t) && opportunityData[t]).map((t) => opportunityData[t]);
+
+  stockItems.sort((a, b) => {
+    const au = a.dcf && a.dcf.applicable && a.dcf.upsideVsPrice !== null ? a.dcf.upsideVsPrice : -Infinity;
+    const bu = b.dcf && b.dcf.applicable && b.dcf.upsideVsPrice !== null ? b.dcf.upsideVsPrice : -Infinity;
+    return bu - au;
+  });
+
+  stockContainer.innerHTML = stockItems.length === 0 ? '<p class="sub">Sin datos todavía.</p>' : stockItems.map((d) => {
+    let verdictBadge = "Sin datos", verdictColorBg = "var(--bg)", verdictColorFg = "var(--muted)";
+    if (d.dcf) {
+      if (d.dcf.applicable && d.dcf.upsideVsPrice !== null) {
+        verdictBadge = "DCF " + fmtPct(d.dcf.upsideVsPrice, 1);
+        if (d.dcf.upsideVsPrice > 5) { verdictColorBg = "var(--green-bg)"; verdictColorFg = "var(--green)"; }
+        else if (d.dcf.upsideVsPrice < -15) { verdictColorBg = "var(--red-bg)"; verdictColorFg = "var(--red)"; }
+        else { verdictColorBg = "var(--amber-bg)"; verdictColorFg = "var(--amber)"; }
+      } else {
+        verdictBadge = "Ver múltiplos"; verdictColorBg = "var(--amber-bg)"; verdictColorFg = "var(--amber)";
+      }
+    }
+    return (
+      '<div class="stock-card" id="opp-card-' + d.ticker + '">' +
+        '<div class="stock-head" onclick="document.getElementById(\'opp-card-' + d.ticker + '\').classList.toggle(\'open\')">' +
+          '<div class="left"><div class="ticker-tag">' + d.ticker + '</div><div>' +
+            '<div class="stock-name">' + (d.companyName || d.ticker) + '</div>' +
+            '<div class="stock-meta">' + (d.sector || "Sector n/d") + '</div>' +
+          '</div></div>' +
+          '<div class="stock-right">' +
+            '<span class="badge" style="background:' + verdictColorBg + '; color:' + verdictColorFg + ';">' + verdictBadge + '</span>' +
+            '<span class="chev">&#9656;</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="stock-body">' +
+          '<div class="section-title">Fundamentales clave</div>' +
+          '<div class="pill-list">' +
+            pill("Precio", d.price ? fmtUsd(d.price) : "n/d") +
+            pill("P/E trailing", d.peTrailing ? d.peTrailing.toFixed(1) + "x" : "n/d") +
+            pill("Crecimiento ingresos", d.revenueGrowthYoy !== null ? fmtPct(d.revenueGrowthYoy * 100, 1) : "n/d") +
+            pill("Margen bruto", d.grossMargin !== null ? fmtPct(d.grossMargin * 100, 1) : "n/d") +
+            pill("ROE", d.roe !== null ? fmtPct(d.roe * 100, 1) : "n/d") +
+          '</div>' +
+          '<div class="section-title">Consenso de analistas</div>' +
+          '<div class="pill-list">' +
+            pill("Calificación", d.analyst && d.analyst.rating ? d.analyst.rating : "n/d") +
+            pill("Precio objetivo", d.analyst && d.analyst.priceTarget ? fmtUsd(d.analyst.priceTarget) : "n/d") +
+          '</div>' +
+          (d.dcf ? (
+            '<div class="section-title">Valoración ilustrativa (DCF)</div>' +
+            '<p class="thesis" style="font-style:italic; margin-bottom:8px;">' + d.dcf.assumptions + '</p>' +
+            '<div class="verdict-box" style="background:' + verdictColorBg + '; color:' + verdictColorFg + ';">' +
+              '<strong>' + (d.dcf.applicable && d.dcf.fairValuePerShare !== null ? "~" + fmtUsd(d.dcf.fairValuePerShare) + "/acción" : "No aplicable de forma confiable") + '</strong> — ' + d.dcf.note +
+            '</div>'
+          ) : "") +
+        '</div>' +
+      '</div>'
+    );
+  }).join("");
+
+  etfContainer.innerHTML = etfItems.length === 0 ? '<p class="sub">Sin datos todavía.</p>' : etfItems.map((d) => (
+    '<div class="card"><h3 style="margin:0 0 10px;">' + d.ticker + ' — ' + (d.name || d.ticker) + '</h3>' +
+    '<div class="pill-list">' +
+      pill("Precio", d.price ? fmtUsd(d.price) : "n/d") +
+      pill("Expense ratio", d.expenseRatio !== null && d.expenseRatio !== undefined ? d.expenseRatio + "%" : "n/d") +
+      pill("Yield", d.yieldPct !== null && d.yieldPct !== undefined ? d.yieldPct + "%" : "n/d") +
+    '</div></div>'
+  )).join("");
+}
+
 // ---------- RIESGOS ----------
 function renderRiesgos() {
   const totalInvested = positions.reduce((s, p) => s + p.investedUsd, 0);
@@ -753,10 +907,12 @@ function renderAll() {
   renderSimulator();
   renderStockCards();
   renderEtfCards();
+  renderOpportunities();
   renderRiesgos();
 }
 
 function switchTab(name) {
+  if (name === "oportunidades" && !opportunitiesLoaded) loadOpportunities(false);
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
   el("tab-" + name).classList.add("active");
