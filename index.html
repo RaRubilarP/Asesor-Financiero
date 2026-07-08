@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Asesor de Portafolio</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f6f7fb; --card: #ffffff; --border: #e4e7ee; --text: #1b2030; --muted: #6b7280;
+    --green: #0a8a4c; --green-bg: #e7f7ef; --red: #c0392b; --red-bg: #fdecea;
+    --blue: #2454d6; --blue-bg: #eaf0ff; --amber: #b8860b; --amber-bg: #fdf3e0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 14px;
+  }
+  .hidden { display: none !important; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 20px 60px; }
+
+  /* --- Auth screen --- */
+  #auth-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .auth-card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 32px; width: 100%; max-width: 380px; }
+  .auth-card h1 { font-size: 20px; margin: 0 0 6px; }
+  .auth-card p.sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12.5px; font-weight: 600; margin-bottom: 5px; color: var(--muted); }
+  .field input, .field select { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; }
+  .btn { border: none; border-radius: 8px; padding: 10px 16px; font-size: 13.5px; font-weight: 700; cursor: pointer; }
+  .btn-primary { background: var(--blue); color: #fff; width: 100%; }
+  .btn-primary:disabled { opacity: .6; cursor: default; }
+  .btn-ghost { background: var(--bg); color: var(--text); border: 1px solid var(--border); }
+  .auth-toggle { text-align: center; margin-top: 14px; font-size: 13px; color: var(--muted); }
+  .auth-toggle a { color: var(--blue); font-weight: 600; cursor: pointer; text-decoration: none; }
+  .auth-error { background: var(--red-bg); color: var(--red); font-size: 12.5px; padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; }
+  .auth-notice { background: var(--green-bg); color: var(--green); font-size: 12.5px; padding: 8px 12px; border-radius: 8px; margin-bottom: 12px; }
+
+  /* --- Header / layout --- */
+  header.top { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .disclaimer { background: var(--amber-bg); border: 1px solid #f0dca0; color: #6b4f00; padding: 12px 14px; border-radius: 10px; font-size: 12.5px; line-height: 1.5; margin-bottom: 18px; }
+  .stat-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; min-width: 150px; flex: 1; }
+  .stat .label { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .stat .value { font-size: 19px; font-weight: 700; }
+  .pos { color: var(--green); } .neg { color: var(--red); }
+
+  .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--border); margin-bottom: 20px; flex-wrap: wrap; }
+  .tab-btn { border: none; background: none; padding: 10px 14px; font-size: 13.5px; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab-btn.active { color: var(--blue); border-bottom-color: var(--blue); }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 16px; }
+  .card h3 { margin: 0 0 12px; font-size: 14px; }
+  .chart-box { position: relative; height: 260px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700; }
+  .badge.green { background: var(--green-bg); color: var(--green); }
+  .badge.red { background: var(--red-bg); color: var(--red); }
+  .badge.blue { background: var(--blue-bg); color: var(--blue); }
+  .badge.amber { background: var(--amber-bg); color: var(--amber); }
+
+  .stock-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; margin-bottom: 16px; overflow: hidden; }
+  .stock-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; cursor: pointer; gap: 12px; flex-wrap: wrap; }
+  .stock-head .left { display: flex; align-items: center; gap: 12px; }
+  .ticker-tag { width: 46px; height: 46px; border-radius: 10px; background: var(--blue-bg); color: var(--blue); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; }
+  .stock-name { font-weight: 700; font-size: 15px; }
+  .stock-meta { color: var(--muted); font-size: 12.5px; }
+  .stock-right { display: flex; align-items: center; gap: 10px; }
+  .chev { transition: transform .15s; color: var(--muted); }
+  .stock-card.open .chev { transform: rotate(90deg); }
+  .stock-body { display: none; padding: 0 18px 20px; border-top: 1px solid var(--border); }
+  .stock-card.open .stock-body { display: block; padding-top: 16px; }
+
+  .section-title { font-size: 12.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); margin: 18px 0 8px; }
+  .section-title:first-child { margin-top: 0; }
+  .pill-list { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; flex: 1; min-width: 130px; }
+  .pill .k { color: var(--muted); font-size: 11px; display:block; margin-bottom:2px; }
+  .pill .v { font-weight: 700; }
+  .thesis { line-height: 1.5; }
+  .verdict-box { border-radius: 10px; padding: 12px 14px; margin-top: 4px; }
+  ul.risks { margin: 0; padding-left: 18px; }
+  ul.risks li { margin-bottom: 5px; line-height: 1.4; }
+  .etf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .etf-grid { grid-template-columns: 1fr; } }
+
+  .upload-box { background: var(--blue-bg); border: 1px solid #c9d9fb; border-radius: 14px; padding: 16px; margin-bottom: 16px; }
+  .upload-box h3 { color: var(--blue); margin: 0 0 8px; }
+  .editable-table input, .editable-table select { width: 100%; padding: 5px 7px; border: 1px solid var(--border); border-radius: 6px; font-size: 12.5px; }
+  footer.note { color: var(--muted); font-size: 11.5px; margin-top: 30px; line-height: 1.6; }
+</style>
+</head>
+<body>
+
+<!-- ================= AUTH SCREEN ================= -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <h1 id="auth-title">Inicia sesión</h1>
+    <p class="sub" id="auth-sub">Accede a tu portafolio y simulador de aportes.</p>
+    <div id="auth-error" class="auth-error hidden"></div>
+    <div id="auth-notice" class="auth-notice hidden"></div>
+    <div class="field">
+      <label>Email</label>
+      <input type="email" id="auth-email" autocomplete="email">
+    </div>
+    <div class="field">
+      <label>Contraseña</label>
+      <input type="password" id="auth-password" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" id="auth-submit-btn" onclick="handleAuthSubmit()">Iniciar sesión</button>
+    <div class="auth-toggle">
+      <span id="auth-toggle-text">¿No tienes cuenta? <a onclick="toggleAuthMode()">Crear una</a></span>
+    </div>
+  </div>
+</div>
+
+<!-- ================= MAIN APP ================= -->
+<div id="main-app" class="hidden">
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <h1>Asesor de Portafolio</h1>
+        <div class="sub" id="last-updated-txt">Sin datos de mercado todavía.</div>
+      </div>
+      <div style="display:flex; flex-direction:column; align-items:flex-end; gap:8px;">
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-primary" id="refresh-btn" onclick="handleRefreshData()">↻ Actualizar datos ahora</button>
+          <button class="btn btn-ghost" onclick="handleLogout()">Cerrar sesión</button>
+        </div>
+        <div id="refresh-status" class="sub" style="max-width:280px; text-align:right;"></div>
+      </div>
+    </header>
+
+    <div class="disclaimer">
+      <strong>Aviso importante:</strong> esta herramienta es informativa y educativa. No constituye asesoría
+      financiera personalizada, ni una recomendación de compra o venta. Las valoraciones DCF son estimaciones
+      ilustrativas con supuestos simplificados, no garantías. Consulta a un asesor financiero registrado antes
+      de invertir.
+    </div>
+
+    <div class="stat-row" id="stat-row"></div>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="simulador" onclick="switchTab('simulador')">Simulador de aporte</button>
+      <button class="tab-btn" data-tab="acciones" onclick="switchTab('acciones')">Acciones y ETFs</button>
+      <button class="tab-btn" data-tab="riesgos" onclick="switchTab('riesgos')">Riesgos &amp; recomendaciones</button>
+    </div>
+
+    <!-- SIMULADOR -->
+    <div class="tab-panel active" id="tab-simulador">
+      <div class="upload-box">
+        <h3>📤 Cargar / actualizar tu portafolio</h3>
+        <div id="upload-idle">
+          <p class="thesis">Sube una captura de tu portafolio (Racional, Robinhood, etc.) y la IA extrae los datos.
+            Revisas y confirmas antes de guardar.</p>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <button class="btn btn-primary" style="width:auto;" onclick="document.getElementById('file-input').click()">Elegir imagen</button>
+            <a style="font-weight:600; color:var(--blue); cursor:pointer; font-size:13px;" onclick="startManualEntry()">O ingresar manualmente</a>
+            <input type="file" id="file-input" accept="image/png,image/jpeg,image/webp" class="hidden" onchange="handleFileSelected(event)">
+          </div>
+          <p id="upload-status" class="sub" style="margin-top:8px;"></p>
+        </div>
+        <div id="upload-draft" class="hidden">
+          <div id="upload-warnings"></div>
+          <table class="editable-table">
+            <thead><tr><th>Ticker</th><th>Nombre</th><th>Tipo</th><th>Invertido US$</th><th>% Ganancia</th><th></th></tr></thead>
+            <tbody id="draft-tbody"></tbody>
+          </table>
+          <div style="display:flex; gap:8px; margin: 10px 0;">
+            <a style="font-weight:600; color:var(--blue); cursor:pointer; font-size:13px;" onclick="addDraftRow()">+ agregar fila</a>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <button class="btn btn-primary" style="width:auto;" onclick="confirmSavePositions()">Guardar portafolio</button>
+            <button class="btn btn-ghost" onclick="cancelDraft()">Cancelar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>¿Cuánto vas a invertir este mes?</h3>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <label class="sub">Monto a invertir (US$)</label>
+          <input type="number" id="invest-amount" value="100" min="0"
+            style="width:140px; padding:9px 11px; border:1px solid var(--border); border-radius:8px; font-size:15px; font-weight:700;"
+            oninput="renderSimulator()">
+        </div>
+        <p class="sub" style="margin-top:10px; line-height:1.5;">
+          La sugerencia prioriza acercar cada posición a un <strong>peso objetivo</strong> (tope ~12% por acción
+          individual, núcleo amplio en ETFs), sin aumentar posiciones ya sobreponderadas. Es un punto de partida,
+          no una orden de compra automática.
+        </p>
+      </div>
+
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0;">Distribución sugerida para tu aporte</h3>
+          <a style="font-weight:600; color:var(--blue); cursor:pointer; font-size:12.5px;" onclick="startEditingTargets()">Editar pesos objetivo</a>
+        </div>
+        <div id="targets-editor" class="hidden" style="margin-top:12px;"></div>
+        <div id="simulator-table-wrap" style="margin-top:12px;">
+          <table>
+            <thead><tr><th>Ticker</th><th>Peso actual</th><th>Peso objetivo</th><th>Monto sugerido</th><th>Peso resultante</th><th>Motivo</th></tr></thead>
+            <tbody id="simulator-tbody"></tbody>
+          </table>
+          <p id="simulator-totals" class="sub" style="margin-top:10px;"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ACCIONES Y ETFS -->
+    <div class="tab-panel" id="tab-acciones">
+      <div class="section-title">Acciones individuales</div>
+      <p class="sub" style="margin-bottom:14px;">Fundamentales, flujo de caja, valoración DCF ilustrativa, consenso
+        de analistas y riesgos — datos en vivo vía Financial Modeling Prep.</p>
+      <div id="stock-cards"></div>
+
+      <div class="section-title" style="margin-top:26px;">ETFs</div>
+      <p class="sub" style="margin-bottom:14px;">Tus ETFs representan el <strong id="etf-weight-txt">0%</strong>
+        del portafolio.</p>
+      <div class="etf-grid" id="etf-cards"></div>
+    </div>
+
+    <!-- RIESGOS -->
+    <div class="tab-panel" id="tab-riesgos">
+      <div class="card"><h3>Concentración y exposición</h3><div id="concentration-text" class="thesis"></div></div>
+      <div class="card"><h3>Checklist antes de tu próximo aporte</h3><ul class="risks" id="risk-ideas"></ul></div>
+    </div>
+
+    <footer class="note">
+      Datos de mercado vía Financial Modeling Prep. Lectura de portafolio vía Gemini (Google). Los modelos DCF
+      usan supuestos definidos por esta app, no consenso de mercado.
+    </footer>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// CONFIGURACIÓN — completa esto después de crear tu proyecto de Supabase
+// (Settings > API en tu dashboard de Supabase). Ver README.md.
+// ============================================================================
+const SUPABASE_URL = "https://gdbeeerzrjogzbhdpgux.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdkYmVlZXJ6cmpvZ3piaGRwZ3V4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMwMTU3MjEsImV4cCI6MjA5ODU5MTcyMX0.7fCKI6gm3z2fGk3Ei2l74_IikZDiubFvRgsqFKoBu0k";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const DEFAULT_TARGET_WEIGHTS = { VOO: 30, SCHD: 15, VXUS: 12, QQQ: 8 };
+
+// ---------- ESTADO ----------
+let authMode = "login"; // "login" | "signup"
+let positions = [];       // [{ticker,name,assetType,investedUsd,gainPct,currentValue,weight}]
+let targetWeights = {};   // {ticker: pct}
+let marketData = {};      // {ticker: fundamentals}
+let draftPositions = null;
+
+// ---------- HELPERS ----------
+function fmtUsd(n) {
+  if (n === null || n === undefined || isNaN(n)) return "n/d";
+  return "US$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtPct(n, digits) {
+  if (n === null || n === undefined || isNaN(n)) return "n/d";
+  digits = digits === undefined ? 2 : digits;
+  return (n >= 0 ? "+" : "") + n.toFixed(digits) + "%";
+}
+function el(id) { return document.getElementById(id); }
+
+// ---------- AUTH ----------
+function toggleAuthMode() {
+  authMode = authMode === "login" ? "signup" : "login";
+  el("auth-title").textContent = authMode === "login" ? "Inicia sesión" : "Crea tu cuenta";
+  el("auth-submit-btn").textContent = authMode === "login" ? "Iniciar sesión" : "Crear cuenta";
+  el("auth-toggle-text").innerHTML = authMode === "login"
+    ? '¿No tienes cuenta? <a onclick="toggleAuthMode()">Crear una</a>'
+    : '¿Ya tienes cuenta? <a onclick="toggleAuthMode()">Inicia sesión</a>';
+  el("auth-error").classList.add("hidden");
+  el("auth-notice").classList.add("hidden");
+}
+
+async function handleAuthSubmit() {
+  const email = el("auth-email").value.trim();
+  const password = el("auth-password").value;
+  const errBox = el("auth-error");
+  const noticeBox = el("auth-notice");
+  errBox.classList.add("hidden");
+  noticeBox.classList.add("hidden");
+
+  if (!email || !password) {
+    errBox.textContent = "Completa email y contraseña.";
+    errBox.classList.remove("hidden");
+    return;
+  }
+
+  const btn = el("auth-submit-btn");
+  btn.disabled = true;
+
+  if (authMode === "login") {
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    btn.disabled = false;
+    if (error) { errBox.textContent = error.message; errBox.classList.remove("hidden"); return; }
+  } else {
+    const { error } = await sb.auth.signUp({ email, password });
+    btn.disabled = false;
+    if (error) { errBox.textContent = error.message; errBox.classList.remove("hidden"); return; }
+    noticeBox.textContent = "Cuenta creada. Si tu proyecto pide confirmación por correo, revisa tu email antes de iniciar sesión.";
+    noticeBox.classList.remove("hidden");
+  }
+}
+
+async function handleLogout() {
+  await sb.auth.signOut();
+  location.reload();
+}
+
+sb.auth.onAuthStateChange((_event, session) => {
+  if (session && session.user) {
+    el("auth-screen").classList.add("hidden");
+    el("main-app").classList.remove("hidden");
+    loadEverything();
+  } else {
+    el("main-app").classList.add("hidden");
+    el("auth-screen").classList.remove("hidden");
+  }
+});
+
+// ---------- CARGA DE DATOS ----------
+async function loadEverything() {
+  await Promise.all([loadPositions(), loadTargetWeights()]);
+  const tickers = positions.map((p) => p.ticker);
+  if (tickers.length > 0) await loadMarketData(false);
+  renderAll();
+}
+
+async function loadPositions() {
+  const { data, error } = await sb.from("positions").select("*").order("invested_usd", { ascending: false });
+  if (error) { console.error(error); positions = []; return; }
+  const rows = data || [];
+  const totalInvested = rows.reduce((s, p) => s + Number(p.invested_usd), 0) || 1;
+  positions = rows.map((p) => {
+    const investedUsd = Number(p.invested_usd);
+    const gainPct = Number(p.gain_pct);
+    const currentValue = investedUsd * (1 + gainPct / 100);
+    return {
+      ticker: p.ticker, name: p.name, assetType: p.asset_type,
+      investedUsd, gainPct, currentValue,
+      weight: (investedUsd / totalInvested) * 100,
+    };
+  });
+}
+
+async function loadTargetWeights() {
+  const { data, error } = await sb.from("target_weights").select("ticker, target_pct");
+  targetWeights = {};
+  if (!error && data && data.length > 0) {
+    data.forEach((d) => (targetWeights[d.ticker] = Number(d.target_pct)));
+  } else {
+    Object.assign(targetWeights, DEFAULT_TARGET_WEIGHTS);
+  }
+}
+
+async function loadMarketData(force) {
+  if (positions.length === 0) return;
+  const tickers = positions.map((p) => p.ticker);
+  const types = positions.map((p) => p.assetType);
+  const { data: sessionData } = await sb.auth.getSession();
+  const token = sessionData.session ? sessionData.session.access_token : null;
+  try {
+    const { data, error } = await sb.functions.invoke("market-data", {
+      body: { tickers, types, force: !!force },
+      headers: token ? { Authorization: "Bearer " + token } : {},
+    });
+    if (error) throw error;
+    marketData = Object.assign({}, marketData, data.data);
+    el("last-updated-txt").textContent = "Última actualización: " + new Date(data.fetchedAt).toLocaleString("es-CL");
+  } catch (e) {
+    console.error("Error cargando datos de mercado:", e);
+  }
+}
+
+async function handleRefreshData() {
+  const btn = el("refresh-btn");
+  const status = el("refresh-status");
+  btn.disabled = true;
+  btn.textContent = "Actualizando…";
+  status.textContent = "Consultando datos de mercado en vivo — puede tardar unos segundos por posición.";
+  await loadMarketData(true);
+  status.textContent = "Datos actualizados.";
+  btn.disabled = false;
+  btn.textContent = "↻ Actualizar datos ahora";
+  renderAll();
+}
+
+// ---------- CARGA DE IMAGEN ----------
+async function handleFileSelected(evt) {
+  const file = evt.target.files[0];
+  if (!file) return;
+  const status = el("upload-status");
+  status.textContent = "Leyendo imagen…";
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    const base64 = reader.result.split(",")[1];
+    const { data: sessionData } = await sb.auth.getSession();
+    const token = sessionData.session ? sessionData.session.access_token : null;
+    try {
+      const { data, error } = await sb.functions.invoke("parse-portfolio-image", {
+        body: { imageBase64: base64, mediaType: file.type },
+        headers: token ? { Authorization: "Bearer " + token } : {},
+      });
+      if (error) throw error;
+      status.textContent = "";
+      draftPositions = data.positions || [];
+      showDraft(data.warnings || []);
+    } catch (e) {
+      status.textContent = "No se pudo leer la imagen: " + (e.message || e);
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+function startManualEntry() {
+  draftPositions = positions.map((p) => ({ ticker: p.ticker, name: p.name, assetType: p.assetType, investedUsd: p.investedUsd, gainPct: p.gainPct }));
+  showDraft([]);
+}
+
+function showDraft(warnings) {
+  el("upload-idle").classList.add("hidden");
+  el("upload-draft").classList.remove("hidden");
+  el("upload-warnings").innerHTML = warnings.length
+    ? '<ul class="risks" style="color:#b8860b;">' + warnings.map((w) => "<li>" + w + "</li>").join("") + "</ul>"
+    : "";
+  renderDraftTable();
+}
+
+function renderDraftTable() {
+  const tbody = el("draft-tbody");
+  tbody.innerHTML = "";
+  draftPositions.forEach((row, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td><input value="' + row.ticker + '" onchange="updateDraftField(' + i + ',\'ticker\',this.value.toUpperCase())"></td>' +
+      '<td><input value="' + (row.name || "") + '" onchange="updateDraftField(' + i + ',\'name\',this.value)"></td>' +
+      '<td><select onchange="updateDraftField(' + i + ',\'assetType\',this.value)">' +
+        '<option value="stock"' + (row.assetType === "stock" ? " selected" : "") + '>Acción</option>' +
+        '<option value="etf"' + (row.assetType === "etf" ? " selected" : "") + '>ETF</option>' +
+      '</select></td>' +
+      '<td><input type="number" step="0.01" value="' + row.investedUsd + '" onchange="updateDraftField(' + i + ',\'investedUsd\',Number(this.value))"></td>' +
+      '<td><input type="number" step="0.01" value="' + row.gainPct + '" onchange="updateDraftField(' + i + ',\'gainPct\',Number(this.value))"></td>' +
+      '<td><a style="cursor:pointer;color:var(--red);font-size:12px;" onclick="removeDraftRow(' + i + ')">quitar</a></td>';
+    tbody.appendChild(tr);
+  });
+}
+function updateDraftField(i, field, value) { draftPositions[i][field] = value; }
+function removeDraftRow(i) { draftPositions.splice(i, 1); renderDraftTable(); }
+function addDraftRow() { draftPositions.push({ ticker: "", name: "", assetType: "stock", investedUsd: 0, gainPct: 0 }); renderDraftTable(); }
+function cancelDraft() { draftPositions = null; el("upload-draft").classList.add("hidden"); el("upload-idle").classList.remove("hidden"); }
+
+async function confirmSavePositions() {
+  const { data: userData } = await sb.auth.getUser();
+  const uid = userData.user.id;
+  const rows = draftPositions
+    .filter((p) => p.ticker)
+    .map((p) => ({
+      user_id: uid, ticker: p.ticker.toUpperCase(), name: p.name || "", asset_type: p.assetType,
+      invested_usd: p.investedUsd, gain_pct: p.gainPct, source: "image-upload",
+    }));
+
+  await sb.from("positions").delete().eq("user_id", uid);
+  const { error } = await sb.from("positions").upsert(rows, { onConflict: "user_id,ticker" });
+  if (error) { alert("Error guardando: " + error.message); return; }
+
+  draftPositions = null;
+  el("upload-draft").classList.add("hidden");
+  el("upload-idle").classList.remove("hidden");
+  el("upload-status").textContent = "Portafolio actualizado.";
+  await loadPositions();
+  await loadMarketData(false);
+  renderAll();
+}
+
+// ---------- SIMULADOR ----------
+function computeAllocation(amount) {
+  const totalCurrent = positions.reduce((s, p) => s + p.currentValue, 0);
+  amount = Math.max(0, Number(amount) || 0);
+  const newTotal = totalCurrent + amount;
+  const totalTargetPct = Object.values(targetWeights).reduce((s, v) => s + v, 0) || 100;
+
+  const rows = positions.map((p) => {
+    const targetPct = targetWeights[p.ticker] || 0;
+    const idealValue = (targetPct / 100) * newTotal;
+    const gap = Math.max(0, idealValue - p.currentValue);
+    return Object.assign({}, p, { targetPct, gap });
+  });
+
+  const totalGap = rows.reduce((s, r) => s + r.gap, 0);
+  const allocated = {};
+  let branch;
+  if (amount <= 0) {
+    branch = "none";
+    rows.forEach((r) => (allocated[r.ticker] = 0));
+  } else if (totalGap <= 0) {
+    branch = "byTarget";
+    rows.forEach((r) => (allocated[r.ticker] = amount * (r.targetPct / totalTargetPct)));
+  } else if (totalGap >= amount) {
+    branch = "gapPriority";
+    rows.forEach((r) => (allocated[r.ticker] = amount * (r.gap / totalGap)));
+  } else {
+    branch = "gapPlusLeftover";
+    const leftover = amount - totalGap;
+    rows.forEach((r) => (allocated[r.ticker] = r.gap + leftover * (r.targetPct / totalTargetPct)));
+  }
+
+  return rows.map((r) => {
+    const suggestedAdd = allocated[r.ticker] || 0;
+    const newValue = r.currentValue + suggestedAdd;
+    let reason;
+    if (branch === "none") {
+      reason = "Ingresa un monto a invertir para ver la sugerencia.";
+    } else if (suggestedAdd < 0.005) {
+      reason = "Ya está en o sobre su peso objetivo (" + r.weight.toFixed(1) + "% vs " + r.targetPct.toFixed(1) + "% objetivo) — sin aporte nuevo.";
+    } else if (branch === "byTarget") {
+      reason = "Todas las posiciones ya están en su peso objetivo — el aporte se reparte según el peso objetivo de cada una.";
+    } else if (branch === "gapPriority") {
+      reason = "Está US$" + r.gap.toFixed(0) + " bajo su peso objetivo — se prioriza para cerrar esa brecha.";
+    } else {
+      reason = "Se cierra su brecha completa (US$" + r.gap.toFixed(0) + ") y además recibe una parte del monto restante.";
+    }
+    return Object.assign({}, r, { suggestedAdd, newValue, newWeight: newTotal > 0 ? (newValue / newTotal) * 100 : 0, reason });
+  });
+}
+
+function renderSimulator() {
+  const tbody = el("simulator-tbody");
+  const totalsEl = el("simulator-totals");
+  if (positions.length === 0) {
+    if (tbody) tbody.innerHTML = "";
+    if (totalsEl) totalsEl.textContent = "Todavía no tienes posiciones cargadas.";
+    return;
+  }
+  const amount = Number(el("invest-amount").value) || 0;
+  const rows = computeAllocation(amount).sort((a, b) => b.suggestedAdd - a.suggestedAdd);
+
+  if (tbody) {
+    tbody.innerHTML = rows.map((r) => (
+      "<tr><td><strong>" + r.ticker + "</strong></td>" +
+      "<td>" + r.weight.toFixed(2) + "%</td>" +
+      "<td>" + r.targetPct.toFixed(1) + "%</td>" +
+      "<td>" + fmtUsd(r.suggestedAdd) + (r.suggestedAdd < 0.005 ? ' <span class="badge amber">sin aporte</span>' : "") + "</td>" +
+      "<td>" + r.newWeight.toFixed(2) + "%</td>" +
+      "<td class=\"sub\" style=\"font-size:12px;\">" + r.reason + "</td></tr>"
+    )).join("");
+  }
+
+  const totalCurrent = positions.reduce((s, p) => s + p.currentValue, 0);
+  if (totalsEl) {
+    totalsEl.textContent = "Aporte a distribuir: " + fmtUsd(amount) + " · Valor actual: " + fmtUsd(totalCurrent) +
+      " · Valor proyectado: " + fmtUsd(totalCurrent + amount);
+  }
+}
+
+function startEditingTargets() {
+  const box = el("targets-editor");
+  box.classList.toggle("hidden");
+  if (box.classList.contains("hidden")) return;
+  box.innerHTML = positions.map((p) => (
+    '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; font-size:13px;">' +
+    '<span style="width:60px; font-weight:700;">' + p.ticker + '</span>' +
+    '<input type="number" step="0.5" id="target-input-' + p.ticker + '" value="' + (targetWeights[p.ticker] || 0) + '" style="width:90px; padding:6px 8px; border:1px solid var(--border); border-radius:6px;">' +
+    '<span class="sub">%</span></div>'
+  )).join("") +
+  '<div style="display:flex; gap:8px; margin-top:10px;">' +
+  '<button class="btn btn-primary" style="width:auto;" onclick="saveTargetWeights()">Guardar pesos objetivo</button>' +
+  '<button class="btn btn-ghost" onclick="el(\'targets-editor\').classList.add(\'hidden\')">Cancelar</button></div>';
+}
+
+async function saveTargetWeights() {
+  const { data: userData } = await sb.auth.getUser();
+  const uid = userData.user.id;
+  const newWeights = {};
+  let total = 0;
+  positions.forEach((p) => {
+    const v = Number(el("target-input-" + p.ticker).value) || 0;
+    newWeights[p.ticker] = v;
+    total += v;
+  });
+  if (Math.abs(total - 100) > 0.5) {
+    alert("Los pesos objetivo deben sumar 100% (suman " + total.toFixed(1) + "%).");
+    return;
+  }
+  await sb.from("target_weights").delete().eq("user_id", uid);
+  const rows = Object.entries(newWeights).map(([ticker, target_pct]) => ({ user_id: uid, ticker, target_pct }));
+  const { error } = await sb.from("target_weights").upsert(rows, { onConflict: "user_id,ticker" });
+  if (error) { alert("Error: " + error.message); return; }
+  targetWeights = newWeights;
+  el("targets-editor").classList.add("hidden");
+  renderSimulator();
+}
+
+// ---------- ACCIONES / ETFS ----------
+function renderStockCards() {
+  const container = el("stock-cards");
+  const stocks = positions.filter((p) => p.assetType === "stock").sort((a, b) => b.weight - a.weight);
+  if (stocks.length === 0) { container.innerHTML = '<p class="sub">No tienes acciones individuales cargadas.</p>'; return; }
+
+  container.innerHTML = stocks.map((p) => {
+    const d = marketData[p.ticker];
+    const gainCls = p.gainPct >= 0 ? "green" : "red";
+    let verdictBadge = 'Sin datos';
+    let verdictColorBg = "var(--bg)", verdictColorFg = "var(--muted)";
+    if (d && d.dcf) {
+      if (d.dcf.applicable && d.dcf.upsideVsPrice !== null) {
+        verdictBadge = "DCF " + fmtPct(d.dcf.upsideVsPrice, 1);
+        if (d.dcf.upsideVsPrice > 5) { verdictColorBg = "var(--green-bg)"; verdictColorFg = "var(--green)"; }
+        else if (d.dcf.upsideVsPrice < -15) { verdictColorBg = "var(--red-bg)"; verdictColorFg = "var(--red)"; }
+        else { verdictColorBg = "var(--amber-bg)"; verdictColorFg = "var(--amber)"; }
+      } else {
+        verdictBadge = "Ver múltiplos"; verdictColorBg = "var(--amber-bg)"; verdictColorFg = "var(--amber)";
+      }
+    }
+
+    const body = !d ? '<p class="sub">Sin datos en caché. Presiona "Actualizar datos ahora".</p>' : (
+      '<div class="section-title">Fundamentales clave</div>' +
+      '<div class="pill-list">' +
+        pill("Precio", d.price ? fmtUsd(d.price) : "n/d") +
+        pill("P/E trailing", d.peTrailing ? d.peTrailing.toFixed(1) + "x" : "n/d") +
+        pill("Crecimiento ingresos", d.revenueGrowthYoy !== null ? fmtPct(d.revenueGrowthYoy * 100, 1) : "n/d") +
+        pill("Margen bruto", d.grossMargin !== null ? fmtPct(d.grossMargin * 100, 1) : "n/d") +
+        pill("Margen operativo", d.operatingMargin !== null ? fmtPct(d.operatingMargin * 100, 1) : "n/d") +
+        pill("FCF (TTM)", d.freeCashFlowTtm ? "US$" + d.freeCashFlowTtm.toLocaleString() + "M" : "n/d") +
+        pill("ROE", d.roe !== null ? fmtPct(d.roe * 100, 1) : "n/d") +
+        pill("Deuda/Patrimonio", d.debtToEquity !== null ? d.debtToEquity.toFixed(2) : "n/d") +
+      '</div>' +
+      '<div class="section-title">Consenso de analistas</div>' +
+      '<div class="pill-list">' +
+        pill("Calificación", d.analyst && d.analyst.rating ? d.analyst.rating : "n/d") +
+        pill("Precio objetivo", d.analyst && d.analyst.priceTarget ? fmtUsd(d.analyst.priceTarget) : "n/d") +
+      '</div>' +
+      '<div class="section-title">Valoración ilustrativa (DCF)</div>' +
+      '<p class="thesis" style="font-style:italic; margin-bottom:8px;">' + d.dcf.assumptions + '</p>' +
+      '<div class="verdict-box" style="background:' + verdictColorBg + '; color:' + verdictColorFg + ';">' +
+        '<strong>' + (d.dcf.applicable && d.dcf.fairValuePerShare !== null ? "~" + fmtUsd(d.dcf.fairValuePerShare) + "/acción" : "No aplicable de forma confiable") + '</strong> — ' + d.dcf.note +
+      '</div>' +
+      '<p class="sub" style="font-size:11px; margin-top:10px;">Datos del ' + new Date(d.fetchedAt).toLocaleString("es-CL") + ' vía Financial Modeling Prep.</p>'
+    );
+
+    return (
+      '<div class="stock-card" id="card-' + p.ticker + '">' +
+        '<div class="stock-head" onclick="document.getElementById(\'card-' + p.ticker + '\').classList.toggle(\'open\')">' +
+          '<div class="left"><div class="ticker-tag">' + p.ticker + '</div><div>' +
+            '<div class="stock-name">' + (d ? d.companyName : p.name || p.ticker) + '</div>' +
+            '<div class="stock-meta">' + (d && d.sector ? d.sector : "Sector n/d") + ' · ' + p.weight.toFixed(2) + '% del portafolio</div>' +
+          '</div></div>' +
+          '<div class="stock-right">' +
+            '<span class="badge ' + gainCls + '">' + fmtPct(p.gainPct) + '</span>' +
+            '<span class="badge" style="background:' + verdictColorBg + '; color:' + verdictColorFg + ';">' + verdictBadge + '</span>' +
+            '<span class="chev">&#9656;</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="stock-body">' + body + '</div>' +
+      '</div>'
+    );
+  }).join("");
+}
+function pill(k, v) { return '<div class="pill"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>'; }
+
+function renderEtfCards() {
+  const container = el("etf-cards");
+  const etfs = positions.filter((p) => p.assetType === "etf").sort((a, b) => b.weight - a.weight);
+  el("etf-weight-txt").textContent = etfs.reduce((s, p) => s + p.weight, 0).toFixed(1) + "%";
+  if (etfs.length === 0) { container.innerHTML = '<p class="sub">No tienes ETFs cargados.</p>'; return; }
+
+  container.innerHTML = etfs.map((p) => {
+    const d = marketData[p.ticker];
+    const body = !d ? '<p class="sub">Sin datos en caché.</p>' : (
+      '<div class="pill-list">' +
+        pill("Expense ratio", d.expenseRatio !== null ? d.expenseRatio + "%" : "n/d") +
+        pill("Yield", d.yieldPct !== null ? d.yieldPct + "%" : "n/d") +
+        pill("Ganancia actual", fmtPct(p.gainPct)) +
+      '</div>'
+    );
+    return (
+      '<div class="card"><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">' +
+      '<h3 style="margin:0;">' + p.ticker + ' — ' + (d ? d.name : p.name || p.ticker) + '</h3>' +
+      '<span class="badge blue">' + p.weight.toFixed(2) + '%</span></div>' + body + '</div>'
+    );
+  }).join("");
+}
+
+// ---------- RIESGOS ----------
+function renderRiesgos() {
+  const totalInvested = positions.reduce((s, p) => s + p.investedUsd, 0);
+  const totalCurrent = positions.reduce((s, p) => s + p.currentValue, 0);
+  const totalGainUsd = totalCurrent - totalInvested;
+  const totalGainPct = totalInvested > 0 ? (totalGainUsd / totalInvested) * 100 : 0;
+  const etfWeight = positions.filter((p) => p.assetType === "etf").reduce((s, p) => s + p.weight, 0);
+  const biggest = [...positions].sort((a, b) => b.weight - a.weight)[0];
+  const worst = [...positions].sort((a, b) => a.gainPct - b.gainPct)[0];
+
+  if (positions.length === 0) {
+    el("concentration-text").innerHTML = '<p class="sub">Carga tu portafolio en la pestaña Simulador para ver este análisis.</p>';
+    el("risk-ideas").innerHTML = "";
+    return;
+  }
+
+  el("concentration-text").innerHTML =
+    '<p>Tu portafolio de ' + fmtUsd(totalInvested) + ' tiene ' + etfWeight.toFixed(1) + '% en ETFs y ' + (100 - etfWeight).toFixed(1) + '% en acciones individuales. ' +
+    'Tu posición más grande es <strong>' + (biggest ? biggest.ticker : "-") + '</strong> con ' + (biggest ? biggest.weight.toFixed(2) : "0") + '% del total.' +
+    (worst && worst.gainPct < 0 ? ' Tu posición con peor desempeño es <strong>' + worst.ticker + '</strong> (' + worst.gainPct.toFixed(2) + '%) — revisa si la tesis sigue vigente antes de aumentarla.' : '') +
+    '</p>';
+
+  el("risk-ideas").innerHTML =
+    '<li>Define un límite máximo por posición individual (ej. 12-15% del portafolio).</li>' +
+    '<li>Revisa la pestaña "Acciones individuales" para ver si cambió algún precio objetivo de analistas.</li>' +
+    '<li>Antes de aumentar una posición en pérdida, confirma que la tesis original sigue intacta.</li>' +
+    '<li>Usa el Simulador de aporte para ver hacia dónde dirigir el capital nuevo.</li>' +
+    '<li>Ajusta tus pesos objetivo si tu tolerancia al riesgo cambió.</li>';
+}
+
+// ---------- STAT ROW ----------
+function renderStatRow() {
+  const totalInvested = positions.reduce((s, p) => s + p.investedUsd, 0);
+  const totalCurrent = positions.reduce((s, p) => s + p.currentValue, 0);
+  const totalGainUsd = totalCurrent - totalInvested;
+  const totalGainPct = totalInvested > 0 ? (totalGainUsd / totalInvested) * 100 : 0;
+  el("stat-row").innerHTML =
+    stat("Total invertido", fmtUsd(totalInvested)) +
+    stat("Valor actual estimado", fmtUsd(totalCurrent)) +
+    stat("Ganancia / pérdida total", fmtUsd(totalGainUsd) + " (" + fmtPct(totalGainPct) + ")", totalGainUsd >= 0 ? "pos" : "neg") +
+    stat("N° de posiciones", String(positions.length));
+}
+function stat(label, value, cls) {
+  return '<div class="stat"><div class="label">' + label + '</div><div class="value ' + (cls || "") + '">' + value + '</div></div>';
+}
+
+// ---------- ORQUESTADOR ----------
+function renderAll() {
+  renderStatRow();
+  renderSimulator();
+  renderStockCards();
+  renderEtfCards();
+  renderRiesgos();
+}
+
+function switchTab(name) {
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+  el("tab-" + name).classList.add("active");
+}
+</script>
+</body>
+</html>
